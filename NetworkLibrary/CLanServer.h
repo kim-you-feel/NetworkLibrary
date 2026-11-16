@@ -50,7 +50,7 @@ private:
 	HANDLE iocpHandle;
 
 	SESSION** sessionArr;
-	std::vector<unsigned long long>* freeList;
+	std::vector<unsigned short>* freeList;
 
 	CRITICAL_SECTION cs_freeList;
 

@@ -74,7 +74,7 @@ bool CLANSERVER::Start(unsigned short port, unsigned int workerCnt, bool nagleFl
 
 	
 	sessionArr = new SESSION*[maxUserNum];
-	freeList = new std::vector<unsigned long long>(maxUserNum);
+	freeList = new std::vector<unsigned short>(maxUserNum);
 	InitializeCriticalSection(&cs_freeList);
 
 
@@ -183,17 +183,21 @@ unsigned int _stdcall CLANSERVER::Accept_Thread()
 		}
 
 		// freeList 동기화 필요.
-		unsigned long long tempSessionIndex = freeList->back();
+		unsigned long long tempSessionID;
+		unsigned short tempSessionIndex = freeList->back();
 		freeList->pop_back();
 
-		tempSessionIndex = tempSessionIndex << 48;
-		tempSessionIndex = tempSessionIndex | sessionCount;
+
+		// Session의 ID 는 Index와 sessionCount의 조합. 앞 2바이트는 ID 뒤 6바이트는 sessionCount.
+
+		tempSessionID = (static_cast<unsigned long long>(tempSessionIndex) << 48) |
+			(sessionCount & 0x0000FFFFFFFFFFFF);
 		sessionCount++;
 
 
 
 		tempSession->socket = tempClientSocket;
-		tempSession->sessionID = tempSessionIndex;
+		tempSession->sessionID = tempSessionID;
 		tempSession->ioCount = 1;
 		tempSession->isSend = false;
 		InitializeCriticalSection(&tempSession->cs_session);
@@ -463,7 +467,7 @@ bool CLANSERVER::DeleteSession(SESSION* tempSession)
 bool CLANSERVER::Disconnect(unsigned long long sessionID)
 {
 	SESSION* tempSession;
-	unsigned short sessionIndex = sessionID >> 48;
+	unsigned short sessionIndex = static_cast<unsigned short>(sessionID >> 48);
 	tempSession = sessionArr[sessionIndex];
 	
 	EnterCriticalSection(&tempSession->cs_session);
@@ -478,7 +482,7 @@ bool CLANSERVER::Disconnect(unsigned long long sessionID)
 bool CLANSERVER::SendPacket(unsigned long long sessionID, CPacket* packet)
 {
 	SESSION* tempSession;
-	unsigned short sessionIndex = sessionID >> 48;
+	unsigned short sessionIndex = static_cast<unsigned short>(sessionID >> 48);
 	tempSession = sessionArr[sessionIndex];
 
 	EnterCriticalSection(&tempSession->cs_session);
