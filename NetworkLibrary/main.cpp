@@ -8,7 +8,7 @@ int main()
 {
 	MY_CLANSERVER testServer;
 
-	testServer.Start(6000, 8, true, 65536);
+	testServer.Start(6000, 8, true, 65535);
 
 	
 

@@ -28,12 +28,15 @@ int CRingBuffer::GetBufferSize()
 
 int CRingBuffer::getUseSize()
 {
-	if (writePos - readPos < 0)
+
+	int tempUseSize = (writePos - readPos);
+
+	if (tempUseSize < 0)
 	{
-		return (writePos - readPos) + internalSize;
+		return tempUseSize + internalSize;
 	}
 
-	return (writePos - readPos);
+	return tempUseSize;
 }
 
 int CRingBuffer::getFreeSize()
@@ -43,9 +46,12 @@ int CRingBuffer::getFreeSize()
 
 int CRingBuffer::Enqueue(const char* chpData, int iSize)
 {
-	if (iSize <= 0 || chpData == nullptr || iSize > getFreeSize())
+
+	const int freeSize = getFreeSize();
+
+	if (iSize <= 0 || chpData == nullptr || iSize > freeSize)
 	{
-		std::wcout << L"Ring Buffer Size lack " << std::endl;
+		__debugbreak();
 		return 0;
 	}
 
@@ -158,14 +164,16 @@ int CRingBuffer::DirectEnqueueSize(void)
 
 int CRingBuffer::DirectDequeueSize(void)
 {
-	if (writePos - readPos >= 0)
+	char* const read = readPos;
+	char* const write = writePos;
+
+	if (write >= read)
 	{
-		return getUseSize();
+		return static_cast<int>(write - read);
 	}
-	else
-	{
-		return (buffer + internalSize) - readPos;
-	}
+
+	return static_cast<int>((buffer + internalSize) - read);
+
 }
 
 

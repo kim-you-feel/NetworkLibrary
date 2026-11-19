@@ -22,10 +22,12 @@ void MY_CLANSERVER::OnMessage(unsigned long long sessionID, CPacket* packet)
 	*packet >> tempLen;
 	*packet >> tempPayload;
 
-	/*std::cout << "Session ID : " << sessionID << std::endl;
-	std::cout << "Recv Length : " << tempLen << std::endl;
-	std::cout << "Recv PayLoad : " << tempPayload << std::endl;*/
+	//std::cout << "Session ID : " << sessionID << std::endl;
+	/*std::cout << "Recv Length : " << tempLen << std::endl;*/
+	/*std::cout << "Recv PayLoad : " << tempPayload << std::endl;*/
 
+	
+	
 	packet->Clear();
 
 	*packet << tempLen;

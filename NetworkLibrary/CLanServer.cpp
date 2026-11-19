@@ -17,13 +17,12 @@
 
 struct SESSION
 {
-	long long sessionID;
+	unsigned long long sessionID;
 	SOCKET socket;
 	CRingBuffer recvBuffer;
 	CRingBuffer sendBuffer;
 	OVERLAPPED recvOverlapped{};
 	OVERLAPPED sendOverlapped{};
-	CRITICAL_SECTION cs_session;
 	unsigned int ioCount;
 	bool isSend;
 };
@@ -49,7 +48,7 @@ BOOL AssociateDeviceWithCompletionPort
 
 // MAIN
 
-bool CLANSERVER::Start(unsigned short port, unsigned int workerCnt, bool nagleFlag, unsigned int maxUserNum)
+bool CLANSERVER::Start(unsigned short port, unsigned int workerCnt, bool nagleFlag, unsigned short maxUserNum)
 {
 	// 네트워크 초기화
 	WSADATA wsaData;
@@ -78,7 +77,7 @@ bool CLANSERVER::Start(unsigned short port, unsigned int workerCnt, bool nagleFl
 	InitializeCriticalSection(&cs_freeList);
 
 
-	std::iota(freeList->begin(), freeList->end(), unsigned int{ 0 });
+	std::iota(freeList->begin(), freeList->end(), unsigned short{ 0 });
 
 
 	// Thread 생성.
@@ -116,9 +115,7 @@ void CLANSERVER::Stop()
 	/*std::map<unsigned long long, SESSION*>::iterator iter = sessionMap.begin();
 	for (; iter != sessionMap.end(); iter++)
 	{
-		EnterCriticalSection(&iter->second->cs_session);
 		closesocket(iter->second->socket);
-		LeaveCriticalSection(&iter->second->cs_session);
 
 	}*/
 
@@ -184,9 +181,12 @@ unsigned int _stdcall CLANSERVER::Accept_Thread()
 
 		// freeList 동기화 필요.
 		unsigned long long tempSessionID;
+
+
+		EnterCriticalSection(&cs_freeList);
 		unsigned short tempSessionIndex = freeList->back();
 		freeList->pop_back();
-
+		LeaveCriticalSection(&cs_freeList);
 
 		// Session의 ID 는 Index와 sessionCount의 조합. 앞 2바이트는 ID 뒤 6바이트는 sessionCount.
 
@@ -200,7 +200,6 @@ unsigned int _stdcall CLANSERVER::Accept_Thread()
 		tempSession->sessionID = tempSessionID;
 		tempSession->ioCount = 1;
 		tempSession->isSend = false;
-		InitializeCriticalSection(&tempSession->cs_session);
 
 		wsabuf[0].buf = tempSession->recvBuffer.GetRearBufferPtr();
 		wsabuf[0].len = tempSession->recvBuffer.DirectEnqueueSize();
@@ -218,7 +217,9 @@ unsigned int _stdcall CLANSERVER::Accept_Thread()
 			(HANDLE)tempSession->socket,
 			(void*)tempSession
 		);
-		
+
+		sessionArr[tempSessionIndex] = tempSession;
+
 		retRecv = WSARecv(
 			tempSession->socket,
 			wsabuf,
@@ -240,7 +241,7 @@ unsigned int _stdcall CLANSERVER::Accept_Thread()
 			}
 		}
 
-		sessionArr[tempSessionIndex] = tempSession;
+		
 		OnAccept(tempSession->sessionID);
 
 		
@@ -273,15 +274,16 @@ unsigned int _stdcall CLANSERVER::IOCP_Worker_Thread()
 			if (!retGQCS)
 			{
 				// 완료 패킷을 꺼내지 못한 ERROR.
+				std::cout << "FQCS False, NOT COMPLETE PACKET" << std::endl;
 				return 0;
 			}
 
 			if (completionKey == 0 && transferred == 0)
 			{
 				// thread 종료 패킷 수신
+				std::cout << "THREAD STOP RECV" << std::endl;
 				return 0;
 			}
-
 			continue;
 		}
 
@@ -289,17 +291,16 @@ unsigned int _stdcall CLANSERVER::IOCP_Worker_Thread()
 
 		SESSION* tempSession = (SESSION*)completionKey;
 
-		EnterCriticalSection(&tempSession->cs_session);
-
 		if (retGQCS == false)
 		{
 			// IO 취소 완료 통지
 			if (GetLastError() == ERROR_OPERATION_ABORTED)
 			{
+				std::cout << "Decrement 298" << std::endl;
 				if (InterlockedDecrement(&tempSession->ioCount) == 0)
 				{
-					LeaveCriticalSection(&tempSession->cs_session);
 					// Release Session
+					std::cout << "IO COMPLETE RECV DELETE" << std::endl;
 					DeleteSession(tempSession);
 				}
 				continue;
@@ -315,14 +316,15 @@ unsigned int _stdcall CLANSERVER::IOCP_Worker_Thread()
 		{
 			// FIN 수신
 			CancelIoEx((HANDLE)tempSession->socket, nullptr);
+			std::cout << "Decrement 318" << std::endl;
 			if (InterlockedDecrement(&tempSession->ioCount) == 0)
 			{
-				LeaveCriticalSection(&tempSession->cs_session);
 				// Release Session
+
+				std::cout << "FIN Delete" << std::endl;
 				DeleteSession(tempSession);
 				continue;
 			}
-			LeaveCriticalSection(&tempSession->cs_session);
 			continue;
 		}
 		
@@ -347,25 +349,25 @@ unsigned int _stdcall CLANSERVER::IOCP_Worker_Thread()
 
 			if (RecvPost(tempSession) == false)
 			{
+				std::cout << "Decrement 351" << std::endl;
 				if (InterlockedDecrement(&tempSession->ioCount) == 0)
 				{
-					std::cout << "Delete Session" << std::endl;
-					LeaveCriticalSection(&tempSession->cs_session);
+					std::cout << "RecvPost Delete Session" << std::endl;
 					DeleteSession(tempSession);
 					continue;
 				}
 			}
-
 
 		}
 		else
 		{
 			// send 시 로직 처리. 및 IO_COUNT 감소.
 			tempSession->sendBuffer.MoveFront(transferred);
+			
+			/*std::cout << "Decrement 366" << std::endl;*/
 			if (InterlockedDecrement(&tempSession->ioCount) == 0)
 			{	
-				std::cout << "Delete Session" << std::endl;
-				LeaveCriticalSection(&tempSession->cs_session);
+				std::cout << "Send IO_COUNT Delete Session : " << tempSession->ioCount << std::endl;
 				DeleteSession(tempSession);
 				continue;
 			}
@@ -374,11 +376,7 @@ unsigned int _stdcall CLANSERVER::IOCP_Worker_Thread()
 			// 만약 sendBuffer에 데이터가 들어왔다면 SendPost를 다시 호출.
 			SendPost(tempSession);
 
-
-
 		}
-
-		LeaveCriticalSection(&tempSession->cs_session);
 
 	}
 
@@ -392,6 +390,12 @@ bool CLANSERVER::SendPost(SESSION* tempSession)
 
 	int retSend = 0;
 	WSABUF wsaBuf_Send[2];
+
+	if (InterlockedExchange8((char*)&tempSession->isSend, true) != false)
+	{
+		return true;
+	}
+
 	wsaBuf_Send[0].buf = tempSession->sendBuffer.GetFrontBufferPtr();
 	wsaBuf_Send[0].len = tempSession->sendBuffer.DirectDequeueSize();
 	/*wsaBuf_Send[1].buf = (char*)&tempSession->sendBuffer;
@@ -399,25 +403,23 @@ bool CLANSERVER::SendPost(SESSION* tempSession)
 
 	if (wsaBuf_Send[0].len == 0)
 	{
+		InterlockedExchange8((char*)&tempSession->isSend, false);
 		return true;
 	}
 
-	if (InterlockedExchange8((char*)&tempSession->isSend, true) != false)
-	{
-		return true;
-	}
-
+	InterlockedIncrement(&tempSession->ioCount);
 	retSend = WSASend(tempSession->socket, wsaBuf_Send, 1, nullptr, 0, &tempSession->sendOverlapped, nullptr);
 	if (retSend == SOCKET_ERROR)
 	{
 		int err = WSAGetLastError();
 		if (err != WSA_IO_PENDING)
 		{
+			std::cout << "WSASEND ERR" << err << std::endl;
 			return false;
 		}
 	}
 
-	InterlockedIncrement(&tempSession->ioCount);
+	
 
 	return true;
 
@@ -454,9 +456,6 @@ bool CLANSERVER::RecvPost(SESSION* tempSession)
 
 bool CLANSERVER::DeleteSession(SESSION* tempSession)
 {
-
-	EnterCriticalSection(&tempSession->cs_session);
-	LeaveCriticalSection(&tempSession->cs_session);
 	closesocket(tempSession->socket);
 	OnRelease(tempSession->sessionID);
 
@@ -470,11 +469,7 @@ bool CLANSERVER::Disconnect(unsigned long long sessionID)
 	unsigned short sessionIndex = static_cast<unsigned short>(sessionID >> 48);
 	tempSession = sessionArr[sessionIndex];
 	
-	EnterCriticalSection(&tempSession->cs_session);
-	
 	CancelIoEx((HANDLE)tempSession->socket, NULL);
-	
-	LeaveCriticalSection(&tempSession->cs_session);
 
 	return false;
 }
@@ -484,15 +479,11 @@ bool CLANSERVER::SendPacket(unsigned long long sessionID, CPacket* packet)
 	SESSION* tempSession;
 	unsigned short sessionIndex = static_cast<unsigned short>(sessionID >> 48);
 	tempSession = sessionArr[sessionIndex];
-
-	EnterCriticalSection(&tempSession->cs_session);
 	
 	tempSession->sendBuffer.Enqueue(packet->GetBufferPtr(), packet->GetDataSize());
-
 	bool retSendPost = false;
 	retSendPost = SendPost(tempSession);
 
-	LeaveCriticalSection(&tempSession->cs_session);
 
 
 	return retSendPost;

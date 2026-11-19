@@ -10,7 +10,7 @@ struct SESSION;
 class CLANSERVER
 {
 public:
-	bool Start(unsigned short port, unsigned int workerCnt, bool nagleFlag, unsigned int maxUserNum);	// 오픈 IP, Port, WorkerCnt, nagleOption, MaxUserNum
+	bool Start(unsigned short port, unsigned int workerCnt, bool nagleFlag, unsigned short maxUserNum);	// 오픈 IP, Port, WorkerCnt, nagleOption, MaxUserNum
 	void Stop();
 	int GetSessionCount(); // Session과 Player는 다른 개념.
 
